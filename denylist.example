@@ -1,0 +1,37 @@
+# GRIM denylist — процессы из этого списка GRIM НЕ ТРОГАЕТ НИКОГДА.
+#
+# Одно правило на строку, `#` — комментарий, регистр не важен.
+# Правило проверяется по трём полям: cmdline, cwd, имя exe.
+#   • Если в правиле есть * или ? — glob, совпасть должно ЦЕЛИКОМ
+#     (пример: python3\ *bot*  или  *run_logged.py)
+#   • Иначе — обычная подстрока (пример: astralis найдёт «python3 run_logged.py»
+#     по cwd=~/projects/astralis, и «…/boot/astralis-bot» по cmdline)
+
+# === инфраструктура ===
+grim                # сам себя (демон и гипервизор)
+sshd                # доступ в терминал
+tmux                # мультиплексор сессий
+crond               # планировщик
+loop.sh             # WoL-петелька из ~/.wol
+opencode            # сессии opencode
+
+# === боты из ~/.termux/boot (имя проекта из ~/projects совпадает по cwd/cmdline) ===
+astralis            # astralis-bot, astralis-music, astralis-radio (~/projects/astralis)
+educadm             # educadm-bot
+gymn                # gymn-bot
+stos                # stos-bbot, stos-userbot
+techpark            # techpark-bot
+klasp               # klasp-gpt
+hotel               # start_hotel_bot
+casino-bot
+latex-bot
+rrbot
+lumigram
+downdetector
+
+# === примеры (раскомментируй / добавь свои) ===
+# python3 *bot*       # любой python-бот (широкое правило)
+# *run_logged.py
+# node *telegram*
+# proot               # целые proot-окружения
+# mc-server           # minecraft-сервер
