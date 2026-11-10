@@ -14,7 +14,7 @@ Process killed by GRIM: python3 leaked_bot.py (pid 1234, RSS 812 MB; RSS 812 MB 
 
 - **Два правила убийства**
   1. per-process: RSS выше лимита **+** процесс не тратит CPU не меньше `silent_seconds`
-  2. аварийный клапан: суммарный RSS всех процессов Termux выше `total_limit_mb` → убивается самый жирный незащищённый
+  2. аварийный клапан: суммарный RSS всех процессов Termux выше `total_limit_mb` → убивается самый жирный незащищённый кандидат (приоритет — молчащим), но **только** не легче `total_floor_mb` и не чаще `total_cooldown_seconds`; если все крупные под denylist или легче floor — GRIM пишет в лог и **никого не трогает**
 - **Denylist** — выбранные процессы (боты) GRIM не трогает **никогда**; правила — glob по `cmdline` / `cwd` / `exe`
 - **Гипервизор** — супервизор, который держит демон живым (рестарт при падении) и переживает ребуты через Termux:Boot
 - **Сообщение «вместо вывода»** — строка дописывается в stdout/stderr жертвы *до* kill, плюс лог и уведомление (termux-api)
@@ -76,11 +76,13 @@ Denylist важнее лимитов: совпавший процесс не б�
 | `silent_seconds` | 90 | сколько процесс обязан молчать перед kill |
 | `check_interval` | 5 | период сканирования, сек |
 | `total_limit_mb` | 4096 | клапан суммарного RSS Termux; `0` — выкл |
+| `total_floor_mb` | 150 | клапан не трогает процессы легче этого |
+| `total_cooldown_seconds` | 60 | минимум секунд между срабатываниями клапана |
 | `grace_seconds` | 3 | ожидание между TERM и KILL |
 | `dry_run` | false | `true` — только логировать «кого бы убил» |
 
 Env-overrides (удобно для тестов): `GRIM_RSS_LIMIT_MB`, `GRIM_SILENT_SECONDS`,
-`GRIM_CHECK_INTERVAL`, `GRIM_TOTAL_LIMIT_MB`, `GRIM_GRACE_SECONDS`, `GRIM_DRY_RUN`,
+`GRIM_CHECK_INTERVAL`, `GRIM_TOTAL_LIMIT_MB`, `GRIM_TOTAL_FLOOR_MB`, `GRIM_TOTAL_COOLDOWN_SECONDS`, `GRIM_GRACE_SECONDS`, `GRIM_DRY_RUN`,
 `GRIM_ONLY_MATCH` (подстрока cmdline — оценивать только совпадающие pid).
 
 ## Denylist: `~/.grim/denylist`

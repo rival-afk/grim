@@ -71,6 +71,8 @@ struct Config {
     silent_seconds: u64,
     check_interval: u64,
     total_limit_mb: u64,
+    total_floor_mb: u64,
+    total_cooldown_seconds: u64,
     grace_seconds: u64,
     dry_run: bool,
     only_match: Option<String>,
@@ -100,6 +102,8 @@ impl Config {
             silent_seconds: get_u64("silent_seconds", 90),
             check_interval: get_u64("check_interval", 5),
             total_limit_mb: get_u64("total_limit_mb", 4096),
+            total_floor_mb: get_u64("total_floor_mb", 150),
+            total_cooldown_seconds: get_u64("total_cooldown_seconds", 60),
             grace_seconds: get_u64("grace_seconds", 3),
             dry_run: get_bool("dry_run", false),
             only_match: None,
@@ -110,6 +114,8 @@ impl Config {
         if let Some(v) = eu("GRIM_SILENT_SECONDS") { c.silent_seconds = v }
         if let Some(v) = eu("GRIM_CHECK_INTERVAL") { c.check_interval = v }
         if let Some(v) = eu("GRIM_TOTAL_LIMIT_MB") { c.total_limit_mb = v }
+        if let Some(v) = eu("GRIM_TOTAL_FLOOR_MB") { c.total_floor_mb = v }
+        if let Some(v) = eu("GRIM_TOTAL_COOLDOWN_SECONDS") { c.total_cooldown_seconds = v }
         if let Some(v) = eu("GRIM_GRACE_SECONDS") { c.grace_seconds = v }
         if let Ok(v) = env::var("GRIM_DRY_RUN") {
             c.dry_run = matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on");
@@ -335,7 +341,16 @@ fn slay(p: &ProcInfo, cfg: &Config, reason: String) {
 #[derive(Clone, Copy, PartialEq)]
 enum Mode { Scan, Check, Daemon }
 
-fn pass(cfg: &Config, mode: Mode, ticks_map: &mut HashMap<u32, (u64, u64)>) {
+struct PassState {
+    ticks: HashMap<u32, (u64, u64)>, // pid -> (prev_ticks, silent_since)
+    last_pressure: u64,              // epoch сек, когда клапан последний раз убил/предупредил
+}
+impl PassState {
+    fn new() -> Self { PassState { ticks: HashMap::new(), last_pressure: 0 } }
+}
+
+fn pass(cfg: &Config, mode: Mode, state: &mut PassState) {
+    let ticks_map = &mut state.ticks;
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let denylist = load_denylist();
     let self_pid = std::process::id();
@@ -380,18 +395,37 @@ fn pass(cfg: &Config, mode: Mode, ticks_map: &mut HashMap<u32, (u64, u64)>) {
         }
     }
 
-    // правило 2 (аварийный клапан): суммарный RSS Termux превышен — убрать самый жирный незащищённый
+    // правило 2 (аварийный клапан): суммарный RSS Termux превышен.
+    // Важно: убиваем ТОЛЬКО если есть крупный кандидат (>= total_floor_mb),
+    // в первую очередь молчащий, не чаще раза в total_cooldown_seconds.
+    // Убийство 2-16 MB fish ради галочки ничего не освобождает — не делаем.
     if mode != Mode::Scan && cfg.total_limit_mb > 0 {
         let total_mb = total_kb / 1024;
-        if total_mb > cfg.total_limit_mb {
-            let victim = procs.iter()
+        if total_mb > cfg.total_limit_mb && now.saturating_sub(state.last_pressure) >= cfg.total_cooldown_seconds {
+            let mut cands: Vec<&ProcInfo> = procs.iter()
                 .filter(|p| !killed.contains(&p.pid))
                 .filter(|p| p.pid != self_pid && p.pid != parent_pid)
+                .filter(|p| p.rss_kb / 1024 >= cfg.total_floor_mb)
                 .filter(|p| denylist_hit(&denylist, &p.cmdline, &p.cwd, &p.exe).is_none())
-                .max_by_key(|p| p.rss_kb);
-            if let Some(v) = victim {
-                slay(v, cfg, format!("total Termux RSS {total_mb} MB > {} MB", cfg.total_limit_mb));
-                killed.push(v.pid);
+                .collect();
+            // молчащие — в первую очередь, затем по RSS
+            cands.sort_by(|a, b| {
+                let sa = ticks_map.get(&a.pid).map(|(_, s)| if *s != 0 { 1 } else { 0 }).unwrap_or(0);
+                let sb = ticks_map.get(&b.pid).map(|(_, s)| if *s != 0 { 1 } else { 0 }).unwrap_or(0);
+                sb.cmp(&sa).then(b.rss_kb.cmp(&a.rss_kb))
+            });
+            state.last_pressure = now; // и kill, и предупреждение — под один cooldown
+            match cands.first() {
+                Some(v) => {
+                    slay(v, cfg, format!("total Termux RSS {total_mb} MB > {} MB (floor {} MB)", cfg.total_limit_mb, cfg.total_floor_mb));
+                    killed.push(v.pid);
+                }
+                None => {
+                    log_line(&format!(
+                        "total Termux RSS {total_mb} MB > {} MB, но все крупные процессы защищены denylist или легче floor {} MB — ничего не трогаю",
+                        cfg.total_limit_mb, cfg.total_floor_mb
+                    ));
+                }
             }
         }
     }
@@ -455,13 +489,13 @@ fn cmd_daemon() {
     let prio = if set_max_priority() { "nice=-20" } else { "nice=-20 rejected (EPERM), staying at current" };
     log_line(&format!("daemon started (rss_limit={}MB silent={}s total={}MB dry_run={}, {prio})",
         cfg.rss_limit_mb, cfg.silent_seconds, cfg.total_limit_mb, cfg.dry_run));
-    let mut ticks_map: HashMap<u32, (u64, u64)> = HashMap::new();
+    let mut state = PassState::new();
     loop {
         if stop_file().exists() {
             log_line("daemon: stop file found, exiting");
             break;
         }
-        pass(&cfg, Mode::Daemon, &mut ticks_map);
+        pass(&cfg, Mode::Daemon, &mut state);
         std::thread::sleep(Duration::from_secs(cfg.check_interval.max(1)));
     }
     let _ = fs::remove_file(daemon_pid_file());
@@ -597,8 +631,8 @@ fn cmd_status() {
     let cfg = Config::load();
     println!("GRIM — Guardian of RAM in Termux");
     println!("  конфиг:      {}", cfg_path().display());
-    println!("  rss_limit:   {} MB   silent: {}s   interval: {}s   total_limit: {}MB   dry_run: {}",
-        cfg.rss_limit_mb, cfg.silent_seconds, cfg.check_interval, cfg.total_limit_mb, cfg.dry_run);
+    println!("  rss_limit:   {} MB   silent: {}s   interval: {}s   total_limit: {}MB   floor: {}MB   cooldown: {}s   dry_run: {}",
+        cfg.rss_limit_mb, cfg.silent_seconds, cfg.check_interval, cfg.total_limit_mb, cfg.total_floor_mb, cfg.total_cooldown_seconds, cfg.dry_run);
     println!("  denylist:    {} ({} правил)", denylist_path().display(), load_denylist().len());
     println!("  стоп-файл:   {}", if stop_file().exists() { "ЕСТЬ (GRIM выключен)" } else { "нет" });
     println!("  гипервизор:  {}", if pid_alive_named(&hyp_pid_file(), "grim") { "работает" } else { "НЕ работает" });
@@ -691,8 +725,8 @@ fn main() {
         Some("start") => cmd_start(false),
         Some("stop") => cmd_stop(),
         Some("status") => cmd_status(),
-        Some("scan") => { let cfg = Config::load(); let mut m = HashMap::new(); pass(&cfg, Mode::Scan, &mut m) }
-        Some("check") => { let mut cfg = Config::load(); cfg.dry_run = true; let mut m = HashMap::new(); pass(&cfg, Mode::Check, &mut m) }
+        Some("scan") => { let cfg = Config::load(); let mut st = PassState::new(); pass(&cfg, Mode::Scan, &mut st) }
+        Some("check") => { let mut cfg = Config::load(); cfg.dry_run = true; let mut st = PassState::new(); pass(&cfg, Mode::Check, &mut st) }
         Some("daemon") => cmd_daemon(),
         Some("hypervisor") => cmd_hypervisor(),
         Some("deny") => cmd_deny(&args[1..]),

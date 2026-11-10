@@ -1,5 +1,5 @@
 # GRIM — Guardian of RAM in Termux · конфиг
-# Ключи: rss_limit_mb, silent_seconds, check_interval, total_limit_mb, grace_seconds, dry_run
+# Ключи: rss_limit_mb, silent_seconds, check_interval, total_limit_mb, total_floor_mb, total_cooldown_seconds, grace_seconds, dry_run
 
 # Процесс считается нарушителем, если RSS > rss_limit_mb И он не тратит CPU
 # (молчит) не меньше silent_seconds подряд.
@@ -8,9 +8,15 @@ silent_seconds=90      # сколько секунд процесс обязан
 check_interval=5       # период сканирования /proc, секунды
 
 # Аварийный клапан: если СУММАРНЫЙ RSS всех наших процессов больше total_limit_mb —
-# GRIM убивает самый жирный незащищённый процесс (в первую очередь «молчащий»).
+# GRIM убивает самый жирный НЕзащищённый процесс (молчащие — в первую очередь).
+# Правила безопасности клапана:
+#   • процессов легче total_floor_mb он не трогает (убивать 2-16 MB fish бессмысленно)
+#   • не чаще раза в total_cooldown_seconds
+#   • если все крупные защищены denylist — пишет в лог и НЕ убивает ничего
 # 0 — отключить клапан.
 total_limit_mb=4096
+total_floor_mb=150        # клапан не трогает процессы легче этого
+total_cooldown_seconds=60 # минимум секунд между срабатываниями клапана
 
 # Сколько ждать после SIGTERM перед SIGKILL
 grace_seconds=3
