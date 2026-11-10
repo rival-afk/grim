@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1573 512" role="img" aria-label="grim banner">
+<title>grim — guardian of RAM</title>
+<style>
+.l{animation:rise .6s cubic-bezier(.22,1,.36,1) backwards}
+.l1{animation-delay:.06s}.l2{animation-delay:.24s}.l3{animation-delay:.4s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.cur{animation:blink 1.06s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion: reduce){.l,.cur{animation:none}}
+</style>
+<rect width="1573" height="512" fill="#000000"/>
+<text class="l l1" x="112" y="214" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'JetBrains Mono',monospace" font-size="142" font-weight="500" fill="#FFFFFF" letter-spacing="2">$ grim <tspan class="cur" font-size="96" fill="#FFFFFF">█</tspan></text>
+<text class="l l2" x="112" y="330" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'JetBrains Mono',monospace" font-size="60" font-weight="400" fill="#FFFFFF">guardian of RAM</text>
+<text class="l l3" x="112" y="424" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'JetBrains Mono',monospace" font-size="34" font-weight="400" fill="#8B8B8B">oom-killer for Termux · zero dependencies · no root</text>
+</svg>

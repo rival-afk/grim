@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="grim — guardian of RAM" width="520">
+</p>
+
+
 # GRIM — Guardian of RAM in Termux
 
 OOM-killer для процессов Termux на **чистом Rust** (ноль внешних зависимостей).
